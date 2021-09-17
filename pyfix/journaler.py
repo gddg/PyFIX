@@ -4,11 +4,15 @@ from pyfix.message import MessageDirection
 from pyfix.session import FIXSession
 
 
+# 定义一个异常
 class DuplicateSeqNoError(Exception):
     pass
 
+# 日志器
 class Journaler(object):
-    def __init__(self, filename = None):
+
+    # 创建表结构 消息和回话.
+    def __init__(self, filename=None):
         if filename is None:
             self.conn = sqlite3.connect(":memory:")
         else:
@@ -16,26 +20,29 @@ class Journaler(object):
 
         self.cursor = self.conn.cursor()
         self.cursor.execute("CREATE TABLE IF NOT EXISTS message("
-                               "seqNo INTEGER NOT NULL,"
-                               "session TEXT NOT NULL,"
-                               "direction INTEGER NOT NULL,"
-                               "msg TEXT,"
-                               "PRIMARY KEY (seqNo, session, direction))")
+                            "seqNo INTEGER NOT NULL,"
+                            "session TEXT NOT NULL,"
+                            "direction INTEGER NOT NULL,"
+                            "msg TEXT,"
+                            "PRIMARY KEY (seqNo, session, direction))")
 
         self.cursor.execute("CREATE TABLE IF NOT EXISTS session("
-                               "sessionId INTEGER PRIMARY KEY AUTOINCREMENT,"
-                               "targetCompId TEXT NOT NULL,"
-                               "senderCompId TEXT NOT NULL,"
-                               "outboundSeqNo INTEGER DEFAULT 0,"
-                               "inboundSeqNo INTEGER DEFAULT 0,"
-                               "UNIQUE (targetCompId, senderCompId))")
+                            "sessionId INTEGER PRIMARY KEY AUTOINCREMENT,"
+                            "targetCompId TEXT NOT NULL,"
+                            "senderCompId TEXT NOT NULL,"
+                            "outboundSeqNo INTEGER DEFAULT 0,"
+                            "inboundSeqNo INTEGER DEFAULT 0,"
+                            "UNIQUE (targetCompId, senderCompId))")
 
     def sessions(self):
         sessions = []
         self.cursor.execute("SELECT sessionId, targetCompId, senderCompId, outboundSeqNo, inboundSeqNo FROM session")
         for sessionInfo in self.cursor:
+            # 回话编号,对手方,本方
             session = FIXSession(sessionInfo[0], sessionInfo[1], sessionInfo[2])
+            #发送序号
             session.sndSeqNum = sessionInfo[3]
+            # 期望接受序号
             session.nextExpectedMsgSeqNum = sessionInfo[4] + 1
             sessions.append(session)
 
@@ -44,15 +51,18 @@ class Journaler(object):
     def createSession(self, targetCompId, senderCompId):
         session = None
         try:
-            self.cursor.execute("INSERT INTO session(targetCompId, senderCompId) VALUES(?, ?)", (targetCompId, senderCompId))
+            self.cursor.execute("INSERT INTO session(targetCompId, senderCompId) VALUES(?, ?)",
+                                (targetCompId, senderCompId))
             sessionId = self.cursor.lastrowid
             self.conn.commit()
             session = FIXSession(sessionId, targetCompId, senderCompId)
         except sqlite3.IntegrityError:
-            raise RuntimeError("Session already exists for TargetCompId: %s SenderCompId: %s" % (targetCompId, senderCompId))
+            raise RuntimeError(
+                "Session already exists for TargetCompId: %s SenderCompId: %s" % (targetCompId, senderCompId))
 
         return session
 
+    #  保存消息到sqlite
     def persistMsg(self, msg, session, direction):
         msgStr = pickle.dumps(msg)
         seqNo = msg["34"]
@@ -65,7 +75,7 @@ class Journaler(object):
 
             self.conn.commit()
         except sqlite3.IntegrityError as e:
-            raise DuplicateSeqNoError("%s is a duplicate" % (seqNo, ))
+            raise DuplicateSeqNoError("%s is a duplicate" % (seqNo,))
 
     def recoverMsg(self, session, direction, seqNo):
         try:
@@ -75,18 +85,22 @@ class Journaler(object):
             return None
 
     def recoverMsgs(self, session, direction, startSeqNo, endSeqNo):
-        self.cursor.execute("SELECT msg FROM message WHERE session = ? AND direction = ? AND seqNo >= ? AND seqNo <= ? ORDER BY seqNo", (session.key, direction.value, startSeqNo, endSeqNo))
+        self.cursor.execute(
+            "SELECT msg FROM message WHERE session = ? AND direction = ? AND seqNo >= ? AND seqNo <= ? ORDER BY seqNo",
+            (session.key, direction.value, startSeqNo, endSeqNo))
         msgs = []
         for msg in self.cursor:
             msgs.append(pickle.loads(msg[0]))
         return msgs
 
-    def getAllMsgs(self, sessions = [], direction = None):
+    # 获取所有消息..
+    def getAllMsgs(self, sessions=[], direction=None):
         sql = "SELECT seqNo, msg, direction, session FROM message"
         clauses = []
         args = []
+        # 拼sql
         if sessions is not None and len(sessions) != 0:
-            clauses.append("session in (" + ','.join('?'*len(sessions)) + ")")
+            clauses.append("session in (" + ','.join('?' * len(sessions)) + ")")
             args.extend(sessions)
         if direction is not None:
             clauses.append("direction = ?")
