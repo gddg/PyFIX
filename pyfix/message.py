@@ -32,7 +32,7 @@ class _FIXRepeatingGroupContainer:
 
     __repr__ = __str__
 
-
+# FIX消息 tags容器..
 class FIXContext(object):
     def __init__(self):
         # 顺序字典
@@ -125,6 +125,7 @@ class FIXContext(object):
     __repr__ = __str__
 
 
+# fix消息体
 class FIXMessage(FIXContext):
     def __init__(self, msgType):
         self.msgType = msgType

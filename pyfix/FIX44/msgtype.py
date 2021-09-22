@@ -92,12 +92,17 @@ SECURITYLIST = "y"
 QUOTECANCEL = "Z"
 DERIVATIVESECURITYLISTREQUEST = "z"
 
+# 系统级消息类型, 心跳,测试请求,重发请求,拒绝,重置序号,登出,录入,
 sessionMessageTypes = [HEARTBEAT, TESTREQUEST, RESENDREQUEST, REJECT, SEQUENCERESET, LOGOUT, LOGON, XMLNONFIX]
 
 tags = {}
+# dir() 列出变量
+# globals()[x] 取变量值 ,"W" = "MARKETDATASNAPSHOTFULLREFRESH"
 for x in dir():
     tags[str(globals()[x])] = x
 
+
+# tag获取名字  35 => 委托
 def msgTypeToName(n):
     try:
         return tags[n]

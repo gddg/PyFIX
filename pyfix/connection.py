@@ -8,6 +8,7 @@ from pyfix.session import *
 from enum import Enum
 from pyfix.event import FileDescriptorEventRegistration, EventType, TimerEventRegistration
 
+# 枚举类型
 class ConnectionState(Enum):
     UNKNOWN = 0
     DISCONNECTED = 1
@@ -15,12 +16,12 @@ class ConnectionState(Enum):
     LOGGED_IN = 3
     LOGGED_OUT = 4
 
+# 异常类
 class FIXException(Exception):
     class FIXExceptionReason(Enum):
         NOT_CONNECTED = 0
         DECODE_ERROR = 1
         ENCODE_ERROR = 2
-
     def __init__(self, reason, description = None):
         super(Exception, self).__init__(description)
         self.reason = reason

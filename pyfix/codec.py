@@ -2,12 +2,15 @@ from datetime import datetime
 import logging
 from pyfix.message import FIXMessage, FIXContext
 
+
 class EncodingError(Exception):
     pass
+
 
 class DecodingError(Exception):
     pass
 
+# 重复组内容
 class RepeatingGroupContext(FIXContext):
     def __init__(self, tag, repeatingGroupTags, parent):
         self.tag = tag
@@ -15,11 +18,14 @@ class RepeatingGroupContext(FIXContext):
         self.parent = parent
         FIXContext.__init__(self)
 
+
+# 解码器
 class Codec(object):
     def __init__(self, protocol):
-        self.protocol = protocol
+        self.protocol = protocol  # 协议,映射,tag=名字
         self.SOH = '\x01'
 
+    # self参数
     @staticmethod
     def current_datetime():
         return datetime.utcnow().strftime("%Y%m%d-%H:%M:%S.%f")[:-3]
@@ -34,6 +40,7 @@ class Codec(object):
         else:
             body.append("%s=%s" % (t, msg[t]))
 
+    # 编码
     def encode(self, msg, session):
         # Create body
         body = []
@@ -87,26 +94,27 @@ class Codec(object):
         cksum = sum([ord(i) for i in list(fixmsg)]) % 256
         fixmsg = fixmsg + "%s=%0.3i" % (self.protocol.fixtags.CheckSum, cksum)
 
-        #print len(fixmsg)
+        # print len(fixmsg)
 
         return fixmsg + SEP
 
     def decode(self, rawmsg):
-        #msg = rawmsg.rstrip(os.linesep).split(SOH)
+        # msg = rawmsg.rstrip(os.linesep).split(SOH)
         try:
             rawmsg = rawmsg.decode('utf-8')
             msg = rawmsg.split(self.SOH)
             msg = msg[:-1]
 
-            if len(msg) < 3: # at a minumum we require BeginString, BodyLength & Checksum
+            if len(msg) < 3:  # at a minumum we require BeginString, BodyLength & Checksum
                 return (None, 0)
-
+            # 解析头
             tag, value = msg[0].split('=', 1)
             if tag != self.protocol.fixtags.BeginString:
                 logging.error("*** BeginString missing or not 1st field *** [" + tag + "]")
             elif value != self.protocol.beginstring:
                 logging.error("FIX Version unexpected (Recv: %s Expected: %s)" % (value, self.protocol.beginstring))
 
+            # 长度
             tag, value = msg[1].split('=', 1)
             msgLength = len(msg[0]) + len(msg[1]) + len('10=000') + 3
             if tag != self.protocol.fixtags.BodyLength:
@@ -114,21 +122,25 @@ class Codec(object):
             else:
                 msgLength += int(value)
 
-            # do we have a complete message on the sockt
+            # do we have a complete message on the socket
+            # 消息长度
             if msgLength > len(rawmsg):
                 return (None, 0)
             else:
                 remainingMsgFragment = msgLength
 
-                # resplit our message
+                # 重新取子串 resplit our message
                 msg = rawmsg[:msgLength].split(self.SOH)
+                # 删去校验码~
                 msg = msg[:-1]
+                # 构造FIXMessage
                 decodedMsg = FIXMessage("UNKNOWN")
 
                 # logging.debug("\t-----------------------------------------")
                 # logging.debug("\t" + "|".join(msg))
 
                 repeatingGroups = []
+                # 获取重复特殊tag
                 repeatingGroupTags = self.protocol.fixtags.repeatingGroupIdentifiers()
                 currentContext = decodedMsg
 
@@ -141,48 +153,58 @@ class Codec(object):
                         logging.info("\t%s(Unknown): %s" % (tag, value))
                         t = "{unknown}"
 
+                    # 校验码计算
                     if tag == self.protocol.fixtags.CheckSum:
                         cksum = ((sum([ord(i) for i in list(self.SOH.join(msg[:-1]))]) + 1) % 256)
                         if cksum != int(value):
                             logging.warning("\tCheckSum: %s (INVALID) expecting %s" % (int(value), cksum))
                     elif tag == self.protocol.fixtags.MsgType:
                         try:
-                            msgType =  self.protocol.msgtype.msgTypeToName(value)
+                            msgType = self.protocol.msgtype.msgTypeToName(value)
                             decodedMsg.setMsgType(value)
                         except KeyError:
                             logging.error('*** MsgType "%s" not supported ***')
 
-                    if tag in repeatingGroupTags: # found the start of a repeating group
-                        if type(currentContext) is RepeatingGroupContext: # i.e. we are already in a repeating group
+                    if tag in repeatingGroupTags:  # 发现是重复组计数器 found the start of a repeating group
+                        if type(currentContext) is RepeatingGroupContext:  # i.e. we are already in a repeating group
+                            # 已经到了有一个新的重复tag数值开始
                             while repeatingGroups and tag not in currentContext.repeatingGroupTags:
+                                # currentContext.parent就是FIXMesssgae根,当前tag和累积的循环tag.
                                 currentContext.parent.addRepeatingGroup(currentContext.tag, currentContext)
+                                # 重新把上下文切换到根部..
                                 currentContext = currentContext.parent
-                                del repeatingGroups[-1] # pop the completed group off the stack
-
+                                del repeatingGroups[-1]  # pop the completed group off the stack
+                        # 1.重复包第一个计数tag, 这个tag对应的重复列表,fix消息放入父
+                        #   tag= NoSecurityAltID  repeatingGroupTags= [SecurityAltID, SecurityAltIDSource],
                         ctx = RepeatingGroupContext(tag, repeatingGroupTags[tag], currentContext)
+                        # 2.放入重复组[]
                         repeatingGroups.append(ctx)
+                        # 3.当前上下文
                         currentContext = ctx
-                    elif repeatingGroups: # we have 1 or more repeating groups in progress & our tag isn't the start of a group
+                    elif repeatingGroups:
+                        # 在重复组中...
+                        # we have 1 or more repeating groups in progress & our tag isn't the start of a group
                         while repeatingGroups and tag not in currentContext.repeatingGroupTags:
                             currentContext.parent.addRepeatingGroup(currentContext.tag, currentContext)
                             currentContext = currentContext.parent
-                            del repeatingGroups[-1] # pop the completed group off the stack
-
+                            del repeatingGroups[-1]  # pop the completed group off the stack
+                        # tag 已经包含了..tags中..{21} 30 21 22 21* 22
                         if tag in currentContext.tags:
                             # if the repeating group already contains this field, start the next
                             currentContext.parent.addRepeatingGroup(currentContext.tag, currentContext)
-                            ctx = RepeatingGroupContext(currentContext.tag, currentContext.repeatingGroupTags, currentContext.parent)
-                            del repeatingGroups[-1] # pop the completed group off the stack
+                            ctx = RepeatingGroupContext(currentContext.tag, currentContext.repeatingGroupTags,
+                                                        currentContext.parent)
+                            del repeatingGroups[-1]  # pop the completed group off the stack
                             repeatingGroups.append(ctx)
                             currentContext = ctx
 
                         # else add it to the current one
                         currentContext.setField(tag, value)
                     else:
-                        # this isn't a repeating group field, so just add it normally
+                        # 普通消息 this isn't a repeating group field, so just add it normally
                         decodedMsg.setField(tag, value)
 
                 return (decodedMsg, remainingMsgFragment)
         except UnicodeDecodeError as why:
-            logging.error("Failed to parse message %s" % (why, ))
+            logging.error("Failed to parse message %s" % (why,))
             return (None, 0)
